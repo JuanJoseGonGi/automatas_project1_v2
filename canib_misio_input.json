@@ -1,0 +1,10 @@
+{
+  "characters": ["C", "C", "C", "M", "M", "M"],
+  "boat": {
+    "drivers": "CM",
+    "capacity": 2,
+    "restricted_boat_states": []
+  },
+  "restricted_states": ["CCM", "CCCM", "CCCMM"],
+  "initial_state": "CCCMMM|"
+}

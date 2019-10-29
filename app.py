@@ -1,213 +1,237 @@
+from transitions_gui import WebMachine as Machine
 import networkx as nx
-import pylab as plt
 import itertools
-
-goalNodeNo = 0
-previousNodeNo = 0
-currentNodeNo = 1
-currentLayerNo = 1
-g = nx.DiGraph()
-boatCapacity = 2
-goalReached = False
-
-# restricted states of river banks and boat
-restrictedRiverbank = []
-restrictedBoat = []
-
-# status registers for riverbanks
-bank1Status = []
-bank2Status = []
-
-driverArr = []
-rolesArr = []
-nonDriverArr = []
+import time
 
 
-# validate the combination on riverbank
-def validateRiverbank(arr):
-    for i in restrictedRiverbank:
-        if sorted(i) == sorted(arr):
-            return False
-    return True
+class App:
+    def __init__(self, data):
+        self.characters = data["characters"]
+        self.initial_state = "".join(sorted(data["initial_state"]))
+        self.boat = data["boat"]
+        self.boat["position"] = "left"
+        self.restricted_states = data["restricted_states"]
 
+        for index, restricted_state in enumerate(self.restricted_states):
+            self.restricted_states[index] = "".join(sorted(restricted_state))
 
-# validate the combination on boat
-def validateBoat(arr):
-    for i in restrictedBoat:
-        if sorted(i) == sorted(arr):
-            return False
-    return True
+        self.states = []
+        self.transitions = []
+        self.goal_state = "|" + "".join(sorted(self.characters))
+        self.graph = nx.MultiDiGraph()
+        self.paths = []
 
+    def isBoatLeft(self):
+        return self.boat["position"] == "left"
 
-# generating all possible combinations and remove lists without drivers
-def generatePermutations(arr):
-    validPermutations = []
-    for j in range(boatCapacity):
-        temp = itertools.combinations(arr, j + 1)
-        for i in temp:
-            tem = set(i).intersection(driverArr)
-            if len(tem) > 0:
-                validPermutations.append(list(i))
-    return validPermutations
+    def isBoatRight(self):
+        return self.boat["position"] == "right"
 
+    def changeBoatPosition(self):
+        if self.boat["position"] == "left":
+            self.boat["position"] = "right"
+            return
 
-# validate generated permutations
-#   remove combinations without any driver
-#   remove combinations that leave starting riverbank incorrect
-#   remove combinations that makes destination riverbank incorrect
-def validatePermutations(arr, l):
-    global bank2Status
-    global bank1Status
-    arr1 = arr[:]
-    for i in arr1:
-        if not validateBoat(i):
-            arr.remove(i)
-            continue
-        if l % 2 == 0:
-            tempBank1 = list(set(bank1Status) - set(i))
-            if not validateRiverbank(tempBank1):
-                arr.remove(i)
+        self.boat["position"] = "left"
+
+    def setAllPossibleStates(self):
+        for index in range(len(self.characters) + 1):
+            combinations = itertools.combinations(self.characters, index)
+            for combination in combinations:
+                right = "".join(sorted(combination))
+                left = self.characters.copy()
+
+                for character in right:
+                    left.remove(character)
+
+                left = "".join(sorted(left))
+
+                if left in self.restricted_states or right in self.restricted_states:
+                    continue
+
+                self.states.append(left + "|" + right)
+
+    def setAllTransitions(self):
+        for i in range(self.boat["capacity"]):
+            for state in self.states:
+                left, right = state.split("|")
+
+                toRightTravelers = itertools.combinations(left, i + 1)
+                for traveler in toRightTravelers:
+                    drivers = set(traveler).intersection(self.boat["drivers"])
+
+                    if len(drivers) == 0:
+                        continue
+
+                    travelerStr = "".join(traveler)
+
+                    if travelerStr in self.boat["restricted_boat_states"]:
+                        continue
+
+                    transitionLeft = list(left)
+                    transitionRight = "".join(sorted(right + travelerStr))
+
+                    for character in travelerStr:
+                        transitionLeft.remove(character)
+
+                    transitionLeft = "".join(sorted(transitionLeft))
+
+                    if (
+                        transitionLeft in self.restricted_states
+                        or transitionRight in self.restricted_states
+                    ):
+                        continue
+
+                    if len(transitionLeft + transitionRight) != len(self.characters):
+                        print(state, transitionLeft, transitionRight, travelerStr, "L")
+                        exit(0)
+
+                    newTransition = ",".join(
+                        [state, "isBoatLeft", transitionLeft + "|" + transitionRight]
+                    )
+
+                    if newTransition not in self.transitions:
+                        self.transitions.append(newTransition)
+
+                toLeftTravelers = itertools.combinations(right, i + 1)
+                for traveler in toLeftTravelers:
+                    drivers = set(traveler).intersection(self.boat["drivers"])
+
+                    if len(drivers) == 0:
+                        continue
+
+                    travelerStr = "".join(traveler)
+
+                    if travelerStr in self.boat["restricted_boat_states"]:
+                        continue
+
+                    transitionLeft = "".join(sorted(left + travelerStr))
+                    transitionRight = list(right)
+
+                    for character in travelerStr:
+                        transitionRight.remove(character)
+
+                    transitionRight = "".join(sorted(transitionRight))
+
+                    if (
+                        transitionLeft in self.restricted_states
+                        or transitionRight in self.restricted_states
+                    ):
+                        continue
+
+                    if len(transitionLeft + transitionRight) != len(self.characters):
+                        print(state, transitionLeft, transitionRight)
+                        exit(0)
+
+                    newTransition = ",".join(
+                        [state, "isBoatRight", transitionLeft + "|" + transitionRight]
+                    )
+
+                    if newTransition not in self.transitions:
+                        self.transitions.append(newTransition)
+
+    def addTransitionsToMachine(self):
+        for transition in self.transitions:
+            source, condition, dest = transition.split(",", 2)
+
+            self.machine.add_transition(
+                trigger=source + "to" + dest,
+                source=source,
+                dest=dest,
+                conditions=condition,
+                after="changeBoatPosition",
+            )
+
+    def createMachine(self):
+        self.machine = Machine(
+            model=self,
+            states=self.states,
+            initial=self.initial_state,
+            name="River crossing",
+            ignore_invalid_triggers=True,
+        )
+
+    def setPaths(self):
+        paths = list(
+            nx.algorithms.all_simple_paths(
+                self.graph, self.initial_state, self.goal_state
+            )
+        )
+
+        pathsToDelete = []
+
+        for path in paths:
+            boatCondition = "isBoatLeft"
+            isToDelete = False
+
+            for index, state in enumerate(path):
+                if index + 2 >= len(path):
+                    break
+
+                for transition in self.transitions:
+                    source, condition, dest = transition.split(",")
+
+                    if (
+                        source == state
+                        and dest == path[index + 1]
+                        and boatCondition == condition
+                    ):
+                        self.paths.append(path)
+
+                    if boatCondition == "isBoatLeft":
+                        boatCondition = "isBoatRight"
+                    else:
+                        boatCondition = "isBoatLeft"
+
+    def drawStatesLabels(self):
+        for state in self.states:
+            nx.draw_networkx_labels(self.graph, self.pos, {state: state})
+
+    def drawLabels(self):
+        self.drawStatesLabels()
+
+    def drawTransitions(self):
+        for transition in self.transitions:
+            source, condition, dest = transition.split(",")
+
+            nx.draw_networkx_edges(self.graph, self.pos, [(source, dest)])
+
+    def drawStates(self):
+        for state in self.states:
+            if state == self.initial_state:
+                nx.draw_networkx_nodes(
+                    self.graph, self.pos, [state], node_color="g", label=state
+                )
                 continue
-            tempBank2 = bank2Status + i
-            if not validateRiverbank(tempBank2):
-                arr.remove(i)
-        else:
-            tempBank1 = bank1Status + i
-            if not validateRiverbank(tempBank1):
-                arr.remove(i)
+
+            if state == self.goal_state:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    self.pos,
+                    [state],
+                    node_color="w",
+                    edgecolors="b",
+                    label=state,
+                )
                 continue
-            tempBank2 = list(set(bank2Status) - set(i))
-            if not validateRiverbank(tempBank2):
-                arr.remove(i)
 
-    return arr
+            nx.draw_networkx_nodes(self.graph, self.pos, [state], label=state)
 
+    def fillGraph(self):
+        for transition in self.transitions:
+            source, condition, dest = transition.split(",")
+            self.graph.add_edges_from([(source, dest)], label=source + " to " + dest)
 
-# add node to chart if not already exists
-def addNodeIfNotExist(arrBank1, arrBank2, l):
-    global g
-    global goalReached
-    global currentNodeNo
-    global previousNodeNo
-    global goalNodeNo
-    global rolesArr
-    ppp = [
-        k_v
-        for k_v in g.nodes(data=True)
-        if set(k_v[1]["bank1"]) == set(arrBank1)
-        and set(k_v[1]["bank2"]) == set(arrBank2)
-        and int(k_v[1]["layer"]) % 2 == (l + 1) % 2
-    ]
-    if len(ppp) == 0:
-        g.add_node(currentNodeNo, bank1=arrBank1, bank2=arrBank2, layer=l + 1)
-        g.add_edge(previousNodeNo, currentNodeNo)
-        currentNodeNo += 1
-        if set(arrBank2) == set(rolesArr):
-            goalReached = True
-            goalNodeNo = currentNodeNo - 1
+    def draw(self):
+        self.pos = nx.spring_layout(self.graph)
 
+        self.drawTransitions()
+        self.drawStates()
+        self.drawLabels()
 
-roles = input("Input characters separated by space : ")
-rolesArr = set(roles.split())
-# riverbank 1 have all characters initially
-bank1Status = rolesArr
-driver = input("Input characters who can drive the boat : ")
-driverArr = set(driver.split())
-boatCapacity = int(input("Input the boat capacity : "))
-nonDriverArr = rolesArr - driverArr
+    def animatePaths(self, frame):
+        for path in self.paths:
+            for state in path:
+                # self.drawStates()
+                nx.draw_networkx_nodes(self.graph, self.pos, [state], node_color="w")
 
-if not driverArr <= rolesArr:
-    print("Drivers must be a subset of characters")
-    exit(0)
-else:
-    print(("Initial state : " + str(list(map(str, rolesArr)))))
-
-restrictedBank = input("Input restricted combinations on riverbanks : ")
-pairList = restrictedBank.split()
-for i in pairList:
-    arr = []
-    j = i.split(",")
-    for k in j:
-        arr.append(k)
-    restrictedRiverbank.append(arr)
-
-restricted_Boat = input("Input restricted combinations on boat : ")
-pairList2 = restricted_Boat.split()
-for i in pairList2:
-    arr = []
-    j = i.split(",")
-    for k in j:
-        arr.append(k)
-    restrictedBoat.append(arr)
-
-g.add_node(currentNodeNo, bank1=list(map(str, rolesArr)), bank2=[], layer=0)
-currentNodeNo += 1
-previousNodeNo += 1
-
-l = 0
-while not goalReached:
-    layer = [k_v1 for k_v1 in g.nodes(data=True) if k_v1[1]["layer"] == l]
-    for b in layer:
-        previousNodeNo = b[0]
-        bank1Status = b[1]["bank1"]
-        bank2Status = b[1]["bank2"]
-        if l % 2 == 0:
-            temp = generatePermutations(bank1Status)
-            temp = validatePermutations(temp, l)
-            for i in temp:
-                arrBank1 = list(set(bank1Status) - set(i))
-                arrBank2 = bank2Status + i
-                addNodeIfNotExist(arrBank1, arrBank2, l)
-        else:
-            temp = generatePermutations(bank2Status)
-            temp = validatePermutations(temp, l)
-            for i in temp:
-                arrBank1 = bank1Status + i
-                arrBank2 = list(set(bank2Status) - set(i))
-                addNodeIfNotExist(arrBank1, arrBank2, l)
-    l += 1
-
-colours = [
-    "red",
-    "green",
-    "blue",
-    "cyan",
-    "blueviolet",
-    "orange",
-    "antiquewhite",
-    "aqua",
-    "aquamarine",
-    "azure",
-    "beige",
-    "bisque",
-    "limegreen",
-    "sandybrown",
-    "deeppink",
-    "tomato",
-    "navy",
-    "coral",
-]
-applyColours = []
-labeldict = {}
-for i in range(currentNodeNo - 1):
-    labeldict[i + 1] = (
-        str(g.node[i + 1]["bank1"])
-        + " | "
-        + str(g.node[i + 1]["bank2"])
-        + " + layer "
-        + str(g.node[i + 1]["layer"])
-    )
-    index = int(g.node[i + 1]["layer"])
-    applyColours.append(colours[index])
-
-path = nx.shortest_path(g, source=1, target=goalNodeNo)
-print("iteration bank1 bank2")
-j = 1
-for i in path:
-    print(str(j) + " " + str(g.node[i]["bank1"]) + " | " + str(g.node[i]["bank2"]))
-    j += 1
-path_edges = list(zip(path, path[1:]))
-pos = nx.spring_layout(g)
-nx.draw(g, pos, labels=labeldict, node_color=applyColours)
-nx.draw_networkx_edges(g, pos, edgelist=path_edges, edge_color="r", width=4)
-plt.show()

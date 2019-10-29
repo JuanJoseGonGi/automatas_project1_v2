@@ -1,0 +1,10 @@
+{
+  "characters": ["L", "C", "G", "R"],
+  "boat": {
+    "drivers": "G",
+    "capacity": 2,
+    "restricted_boat_states": []
+  },
+  "restricted_states": ["LC", "LCR", "CR"],
+  "initial_state": "LCGR|"
+}
